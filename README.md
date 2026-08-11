@@ -1,0 +1,37 @@
+# Standalone Target Test Application
+
+A decoupled sample Python HTTP application used for testing and demonstrating AutoCure's automated remediation and log monitoring capabilities.
+
+## Structure
+- `app.py`: Simple HTTP server exposing endpoints (`/calculate`, `/users`, `/items`) with intentional bugs.
+- `test_app.py`: Pytest test suite verifying correct behavior.
+- `trigger_error.py`: Utility script to trigger error endpoints.
+- `requirements.txt`: Minimal dependencies for running the app and its tests.
+
+## Running the Application Standalone
+
+### 1. Run the HTTP Server
+```bash
+python app.py
+```
+The server will run on `http://127.0.0.1:8080` (or the port specified by `PORT` environment variable) and log to stdout and `app.log`.
+
+### 2. Run the Unit Tests
+```bash
+pytest test_app.py
+```
+
+### 3. Simulate Errors
+```bash
+# Trigger ZeroDivisionError (/calculate?a=10&b=0)
+python trigger_error.py calculate
+
+# Trigger KeyError (/users?id=999)
+python trigger_error.py users
+
+# Trigger IndexError (/items?index=999)
+python trigger_error.py items
+
+# Trigger all errors
+python trigger_error.py all
+```
