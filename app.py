@@ -3,33 +3,32 @@ import logging
 import os
 import sys
 import time
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
-# Set up logging to both stdout and a local log file
+from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+
 LOG_DIR = Path(__file__).resolve().parent
 LOG_FILE = LOG_DIR / "app.log"
 
 logger = logging.getLogger("test_application")
 logger.setLevel(logging.DEBUG)
 
-# Create file handler
-fh = logging.FileHandler(str(LOG_FILE))
-fh.setLevel(logging.DEBUG)
+file_handler = logging.FileHandler(str(LOG_FILE))
+file_handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
-# Create formatter
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-fh.setFormatter(formatter)
-logger.addHandler(fh)
-
-# Also output to stdout
-sh = logging.StreamHandler(sys.stdout)
-sh.setFormatter(formatter)
-logger.addHandler(sh)
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setFormatter(formatter)
+logger.addHandler(stream_handler)
 
 USERS = {"1": "Alice", "2": "Bob"}
 ITEMS = ["apple", "banana", "cherry"]
+
 
 def divide(a: int, b: int) -> float:
     if b == 0:
@@ -39,13 +38,20 @@ def divide(a: int, b: int) -> float:
 
 
 def get_user(user_id: str) -> str:
-    return USERS.get(user_id, "Unknown User")
+    return USERS.get(str(user_id), "Unknown User")
 
 
 def get_item(index: int) -> str:
-    if index < 0 or index >= len(ITEMS):
-        return "Unknown Item"
-    return ITEMS[index]
+    if not isinstance(index, int):
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return "Unknown Item"
+
+    if 0 <= index < len(ITEMS):
+        return ITEMS[index]
+    return "Unknown Item"
+
 
 class StandaloneRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -198,15 +204,114 @@ class StandaloneRequestHandler(BaseHTTPRequestHandler):
             for log_entry in payload["logs"]:
                 logger.error("[%s] %s", payload["app_name"], log_entry)
 
-            self._send_json(200, {
-                "status": "accepted",
-                "project_id": "testapp",
-                "app_name": payload["app_name"],
-                "received_logs": len(payload["logs"]),
-            })
+            self._send_json(
+                200,
+                {
+                    "status": "accepted",
+                    "project_id": "testapp",
+                    "app_name": payload["app_name"],
+                    "received_logs": len(payload["logs"]),
+                },
+            )
             return
 
         self._send_json(404, {"error": "Not Found"})
+
+
+def _read_log_errors() -> list[str]:
+    if not LOG_FILE.exists():
+        return []
+    with LOG_FILE.open("r", encoding="utf-8", errors="replace") as log_handle:
+        entries = log_handle.read().splitlines()
+    return [
+        line.strip()
+        for line in entries
+        if any(level in line.upper() for level in ("ERROR", "CRITICAL", "EXCEPTION"))
+    ][-50:]
+
+
+app = FastAPI(title="Standalone Target Test Application")
+
+
+@app.get("/health")
+async def health() -> dict:
+    return {"status": "healthy"}
+
+
+@app.get("/calculate")
+async def calculate(a: int = Query(...), b: int = Query(...)) -> dict:
+    if b == 0:
+        raise HTTPException(status_code=400, detail="Division by zero is not supported.")
+    return {"result": divide(a, b)}
+
+
+@app.get("/users")
+async def users(user_id: str = Query(..., alias="id")) -> dict:
+    user = get_user(user_id)
+    if user == "Unknown User":
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"user": user}
+
+
+@app.get("/items")
+async def items(index: int = Query(...)) -> dict:
+    item = get_item(index)
+    if item == "Unknown Item":
+        raise HTTPException(status_code=404, detail="Item not found.")
+    return {"item": item}
+
+
+@app.get("/api/v1/projects/testapp/logs")
+async def project_logs_stream() -> StreamingResponse:
+    def event_generator():
+        error_lines = _read_log_errors()
+        if not error_lines:
+            yield 'event: log\ndata: {"message": "No error logs found"}\n\n'
+            return
+
+        for line in error_lines:
+            yield f"event: error\ndata: {json.dumps({'message': line})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "Connection": "close"},
+    )
+
+
+@app.post("/api/v1/projects/testapp/logs")
+async def project_logs_post(
+    request: Request,
+    project_id: str | None = Header(default=None, alias="project_id"),
+):
+    if project_id != "testapp":
+        raise HTTPException(status_code=400, detail="project_id header must be 'testapp'")
+
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON") from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be an object")
+
+    app_name = payload.get("app_name")
+    logs = payload.get("logs")
+    if app_name != "default":
+        raise HTTPException(status_code=400, detail="app_name must be 'default'")
+    if not isinstance(logs, list) or not all(isinstance(item, str) for item in logs):
+        raise HTTPException(status_code=400, detail="logs must be an array of strings")
+
+    for log_entry in logs:
+        logger.error("[%s] %s", app_name, log_entry)
+
+    return {
+        "status": "accepted",
+        "project_id": "testapp",
+        "app_name": app_name,
+        "received_logs": len(logs),
+    }
+
 
 def run_server(port=8080):
     server_address = ("", port)
@@ -218,6 +323,11 @@ def run_server(port=8080):
         logger.info("Stopping test application server...")
         httpd.server_close()
 
+
 if __name__ == "__main__":
+    import uvicorn
+
     port = int(os.environ.get("PORT", 8000))
-    run_server(port=port)
+    logger.info(f"Starting test application server on port {port}...")
+    uvicorn.run(app, host="0.0.0.0", port=port)
+

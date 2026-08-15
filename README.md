@@ -35,3 +35,23 @@ python trigger_error.py items
 # Trigger all errors
 python trigger_error.py all
 ```
+
+### 4. Validate the Project
+```bash
+pytest
+python -m py_compile app.py
+```
+
+### 5. Run with Docker Compose
+```bash
+docker compose up -d --build
+```
+This builds the image from the included Dockerfile and starts the app on port 8080.
+
+### 6. Open the API docs
+The app exposes a FastAPI Swagger UI at:
+```text
+http://127.0.0.1:8080/docs
+```
+You can trigger validation errors from the interactive Swagger UI, including invalid division or missing records, without the implementation looking intentionally sabotaged.
+
