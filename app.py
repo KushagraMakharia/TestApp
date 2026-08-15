@@ -31,9 +31,6 @@ ITEMS = ["apple", "banana", "cherry"]
 
 
 def divide(a: int, b: int) -> float:
-    if b == 0:
-        logger.warning("Division by zero attempted for %s / %s", a, b)
-        return 0.0
     return a / b
 
 
@@ -240,24 +237,18 @@ async def health() -> dict:
 
 @app.get("/calculate")
 async def calculate(a: int = Query(...), b: int = Query(...)) -> dict:
-    if b == 0:
-        raise HTTPException(status_code=400, detail="Division by zero is not supported.")
     return {"result": divide(a, b)}
 
 
 @app.get("/users")
 async def users(user_id: str = Query(..., alias="id")) -> dict:
     user = get_user(user_id)
-    if user == "Unknown User":
-        raise HTTPException(status_code=404, detail="User not found.")
     return {"user": user}
 
 
 @app.get("/items")
 async def items(index: int = Query(...)) -> dict:
     item = get_item(index)
-    if item == "Unknown Item":
-        raise HTTPException(status_code=404, detail="Item not found.")
     return {"item": item}
 
 
@@ -284,23 +275,10 @@ async def project_logs_post(
     request: Request,
     project_id: str | None = Header(default=None, alias="project_id"),
 ):
-    if project_id != "testapp":
-        raise HTTPException(status_code=400, detail="project_id header must be 'testapp'")
-
-    try:
-        payload = await request.json()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Request body must be valid JSON") from exc
-
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Request body must be an object")
+    payload = await request.json()
 
     app_name = payload.get("app_name")
     logs = payload.get("logs")
-    if app_name != "default":
-        raise HTTPException(status_code=400, detail="app_name must be 'default'")
-    if not isinstance(logs, list) or not all(isinstance(item, str) for item in logs):
-        raise HTTPException(status_code=400, detail="logs must be an array of strings")
 
     for log_entry in logs:
         logger.error("[%s] %s", app_name, log_entry)
