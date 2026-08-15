@@ -3,12 +3,14 @@ import logging
 import os
 import sys
 import time
+import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+import httpx
 
 LOG_DIR = Path(__file__).resolve().parent
 LOG_FILE = LOG_DIR / "app.log"
@@ -227,7 +229,43 @@ def _read_log_errors() -> list[str]:
     ][-50:]
 
 
+async def send_error_to_webhook(error_type: str, error_message: str, error_traceback: str):
+    """Send error traceback to the webhook endpoint."""
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                "http://127.0.0.1:8000/api/v1/projects/testapp/webhook",
+                json={
+                    "error_type": error_type,
+                    "error_message": error_message,
+                    "traceback": error_traceback,
+                },
+                timeout=5.0,
+            )
+    except Exception as e:
+        logger.error(f"Failed to send error to webhook: {e}")
+
+
 app = FastAPI(title="Standalone Target Test Application")
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch all exceptions and send them to the webhook."""
+    error_type = type(exc).__name__
+    error_message = str(exc)
+    error_traceback = traceback.format_exc()
+    
+    logger.error(f"Exception caught: {error_type} - {error_message}\n{error_traceback}")
+    
+    # Send error to webhook
+    await send_error_to_webhook(error_type, error_message, error_traceback)
+    
+    return {
+        "detail": "Internal server error",
+        "error_type": error_type,
+        "error_message": error_message,
+    }, 500
 
 
 @app.get("/health")
@@ -288,6 +326,24 @@ async def project_logs_post(
         "project_id": "testapp",
         "app_name": app_name,
         "received_logs": len(logs),
+    }
+
+
+@app.post("/api/v1/projects/testapp/webhook")
+async def webhook_endpoint(request: Request) -> dict:
+    """Receive error tracebacks from the exception handler."""
+    payload = await request.json()
+    
+    error_type = payload.get("error_type")
+    error_message = payload.get("error_message")
+    error_traceback = payload.get("traceback")
+    
+    logger.error(f"Webhook received error: {error_type} - {error_message}")
+    logger.error(f"Traceback:\n{error_traceback}")
+    
+    return {
+        "status": "received",
+        "error_type": error_type,
     }
 
 
