@@ -9,3 +9,5 @@ active_error.json
 htmlcov/
 .env
 .venv/
+
+test_temp_write.txt
