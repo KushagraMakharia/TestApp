@@ -3,7 +3,14 @@
 A decoupled sample Python HTTP application used for testing and demonstrating AutoCure's automated remediation and log monitoring capabilities.
 
 ## Structure
-- `app.py`: Simple HTTP server exposing endpoints (`/calculate`, `/users`, `/items`) with intentional bugs.
+- `app.py`: Compatibility exports and the uvicorn entry point.
+- `api.py`: FastAPI application, routes, error handling, and webhook integration.
+- `standalone_server.py`: Legacy `http.server` adapter and log ingestion endpoint.
+- `domain.py`: Shared users, items, and calculation helpers.
+- `logger.py`: Shared `ApplicationLogger` class and initialized application logger.
+- `logging_config.py`: Backward-compatible logger import.
+- `config.json`: Runtime URL configuration for error webhook delivery.
+- `settings.py`: Shared filesystem settings.
 - `test_app.py`: Pytest test suite verifying correct behavior.
 - `trigger_error.py`: Utility script to trigger error endpoints.
 - `requirements.txt`: Minimal dependencies for running the app and its tests.
