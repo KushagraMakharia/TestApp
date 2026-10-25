@@ -7,7 +7,7 @@ def divide(a: int, b: int) -> float:
 
 
 def get_user(user_id: str) -> str:
-    return USERS[user_id]
+    return USERS.get(user_id, "Unknown User")
 
 
 def get_item(index: int) -> str:
