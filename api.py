@@ -26,19 +26,34 @@ async def send_error_to_webhook(error_type: str, error_message: str, error_trace
         logger.error(f"Failed to send error to webhook: {exc}")
 
 
-def _read_log_errors() -> list[str]:
+def _read_all_logs() -> list[str]:
     if not LOG_FILE.exists():
         return []
     with LOG_FILE.open("r", encoding="utf-8", errors="replace") as log_handle:
         entries = log_handle.read().splitlines()
+    return [line.strip() for line in entries if line.strip()][-100:]
+
+
+def _read_log_errors() -> list[str]:
     return [
-        line.strip()
-        for line in entries
+        line
+        for line in _read_all_logs()
         if any(level in line.upper() for level in ("ERROR", "CRITICAL", "EXCEPTION"))
     ][-50:]
 
 
 app = FastAPI(title="Standalone Target Test Application")
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    client_ip = request.client.host if request.client else "unknown"
+    path = request.url.path
+    if request.url.query:
+        path = f"{path}?{request.url.query}"
+    response = await call_next(request)
+    logger.info(f"{client_ip} - \"{request.method} {path} HTTP/1.1\" {response.status_code}")
+    return response
 
 
 @app.exception_handler(Exception)
@@ -81,12 +96,17 @@ async def items(index: int = Query(...)) -> dict:
 @app.get("/api/v1/projects/testapp/logs")
 async def project_logs_stream() -> StreamingResponse:
     def event_generator():
-        error_lines = _read_log_errors()
-        if not error_lines:
-            yield 'event: log\ndata: {"message": "No error logs found"}\n\n'
+        log_lines = _read_all_logs()
+        if not log_lines:
+            yield 'event: log\ndata: {"message": "No logs found"}\n\n'
             return
-        for line in error_lines:
-            yield f"event: error\ndata: {json.dumps({'message': line})}\n\n"
+        for line in log_lines:
+            event_type = (
+                "error"
+                if any(level in line.upper() for level in ("ERROR", "CRITICAL", "EXCEPTION"))
+                else "log"
+            )
+            yield f"event: {event_type}\ndata: {json.dumps({'message': line})}\n\n"
 
     return StreamingResponse(
         event_generator(),

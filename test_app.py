@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 import urllib.request
-from http.server import HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from app import StandaloneRequestHandler, divide, get_item, get_user
 
@@ -57,6 +57,28 @@ def test_logs_endpoint_streams_errors():
         server.server_close()
 
 
+def test_logs_endpoint_streams_all_logs():
+    server = HTTPServer(("127.0.0.1", 0), StandaloneRequestHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        info_message = f"INFO - streamed info test log {time.time()}"
+        logging.getLogger("test_application").info(info_message)
+
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{server.server_address[1]}/api/v1/projects/testapp/logs",
+            timeout=5,
+        ) as response:
+            body = response.read().decode("utf-8")
+            assert response.headers.get_content_type() == "text/event-stream"
+
+        assert info_message in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_logs_endpoint_accepts_required_project_header_and_schema():
     server = HTTPServer(("127.0.0.1", 0), StandaloneRequestHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -80,3 +102,59 @@ def test_logs_endpoint_accepts_required_project_header_and_schema():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_http_log_stream_handler():
+    from logger import HttpLogStreamHandler
+
+    received = []
+
+    class MockLogServer(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            received.append(
+                {
+                    "payload": payload,
+                    "key": self.headers.get("X-AutoCure-Ingestion-Key"),
+                }
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status": "ok"}')
+
+        def log_message(self, *args):
+            pass
+
+    mock_server = HTTPServer(("127.0.0.1", 0), MockLogServer)
+    mock_port = mock_server.server_address[1]
+    thread = threading.Thread(target=mock_server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        handler = HttpLogStreamHandler(
+            endpoint_url=f"http://127.0.0.1:{mock_port}/api/v1/projects/testapp/logs",
+            ingestion_key="test-key",
+            app_name="testapp",
+            flush_interval=0.05,
+        )
+        test_logger = logging.getLogger("test_stream_mock")
+        test_logger.setLevel(logging.INFO)
+        test_logger.addHandler(handler)
+
+        test_logger.info("Sample streaming log line 1")
+        test_logger.warning("Sample streaming log line 2")
+        handler.flush()
+
+        assert len(received) >= 1
+        all_logs = []
+        for r in received:
+            all_logs.extend(r["payload"]["logs"])
+        assert any("Sample streaming log line 1" in line for line in all_logs)
+        assert any("Sample streaming log line 2" in line for line in all_logs)
+        assert received[0]["key"] == "test-key"
+        handler.close()
+    finally:
+        mock_server.shutdown()
+        mock_server.server_close()

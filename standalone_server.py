@@ -36,20 +36,21 @@ class StandaloneRequestHandler(BaseHTTPRequestHandler):
             with LOG_FILE.open("r", encoding="utf-8", errors="replace") as log_handle:
                 entries = log_handle.read().splitlines()
 
-            error_lines = [
-                line.strip()
-                for line in entries
-                if any(level in line.upper() for level in ("ERROR", "CRITICAL", "EXCEPTION"))
-            ]
+            lines = [line.strip() for line in entries if line.strip()]
 
-            if not error_lines:
-                self.wfile.write(b'event: log\ndata: {"message": "No error logs found"}\n\n')
+            if not lines:
+                self.wfile.write(b'event: log\ndata: {"message": "No logs found"}\n\n')
                 self.wfile.flush()
                 return
 
-            for line in error_lines[-50:]:
+            for line in lines[-50:]:
+                event_type = (
+                    "error"
+                    if any(level in line.upper() for level in ("ERROR", "CRITICAL", "EXCEPTION"))
+                    else "log"
+                )
                 payload = json.dumps({"message": line})
-                self.wfile.write(f"event: error\ndata: {payload}\n\n".encode("utf-8"))
+                self.wfile.write(f"event: {event_type}\ndata: {payload}\n\n".encode("utf-8"))
                 self.wfile.flush()
         except Exception as exc:
             logger.exception("Failed to stream logs")
@@ -57,6 +58,8 @@ class StandaloneRequestHandler(BaseHTTPRequestHandler):
                 f"event: error\ndata: {json.dumps({'message': str(exc)})}\n\n".encode("utf-8")
             )
             self.wfile.flush()
+
+    _stream_logs = _stream_error_logs
 
     def _validate_project_log_request(self):
         project_id = self.headers.get("project_id")

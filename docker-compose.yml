@@ -4,8 +4,11 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: test-application
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
     environment:
       PORT: 8080
+      DOCKER_CONTAINER: "true"
     restart: unless-stopped

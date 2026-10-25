@@ -1,3 +1,6 @@
 {
-  "error_webhook_url": "http://127.0.0.1:8000/api/v1/projects/testapp/webhook"
+  "error_webhook_url": "http://localhost:8000/api/v1/projects/testapp/webhook",
+  "log_stream_url": "http://localhost:8000/api/v1/projects/testapp/logs",
+  "ingestion_key": "qd8Ov-JX3ZBAyOs_qhxqdFAm6enAG-2ty6UGer4AHOY",
+  "app_name": "testapp"
 }
