@@ -9,11 +9,8 @@ def divide(a: int, b: int) -> float:
 
 
 def get_user(user_id: str) -> str:
-    return USERS.get(user_id, "Unknown User")
+    return USERS[user_id]
 
 
 def get_item(index: int) -> str:
-    try:
-        return ITEMS[index]
-    except IndexError:
-        return "Unknown Item"
+    return ITEMS[index]
