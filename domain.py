@@ -11,4 +11,7 @@ def get_user(user_id: str) -> str:
 
 
 def get_item(index: int) -> str:
-    return ITEMS[index]
+    try:
+        return ITEMS[index]
+    except IndexError:
+        return "Unknown Item"
